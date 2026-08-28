@@ -133,7 +133,7 @@ composer test
 ```
 
 No network and no dev dependencies. Webhook verification is checked against the
-shared corpus in [`payzum-openapi`](https://github.com/payzumhq/payzum-openapi),
+shared corpus in [`payzum-openapi`](https://github.com/payzum-dev/payzum-openapi),
 the same vectors the TypeScript and Python SDKs verify against — including cases
 that reproduce the cross-scheme confusion above, so no SDK can ship it.
 
