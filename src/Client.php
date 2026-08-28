@@ -61,6 +61,8 @@ final class Client
         array $extraHeaders = [],
         bool $authenticated = true,
         bool $retryable = true,
+        /** Keys whose string values must go out as exact JSON numbers. */
+        array $exactNumericFields = [],
     ): array {
         $headers = $extraHeaders + [
             'Accept' => 'application/json',
@@ -73,8 +75,9 @@ final class Client
 
         $body = null;
         if ($json !== null) {
-            $encoded = json_encode($json, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-            $body = $encoded;
+            // Amounts stay strings all the way here and become numbers only in
+            // the encoded text, so no float ever touches them (see Json).
+            $body = Json::encodeWithExactNumbers($json, $exactNumericFields);
             $headers['Content-Type'] = 'application/json';
         }
 
@@ -140,6 +143,7 @@ final class Client
             json: $payload,
             extraHeaders: $headers,
             retryable: $idempotencyKey !== null,
+            exactNumericFields: ['price_amount'],
         );
     }
 

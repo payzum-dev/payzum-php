@@ -52,7 +52,9 @@ final class Payments
         }
 
         $payload = array_filter([
-            'price_amount' => 0 + $priceAmount,
+            // Stays a string here on purpose. Client encodes it as an exact
+            // JSON number; casting to float would round it on the way out.
+            'price_amount' => $priceAmount,
             'price_currency' => $priceCurrency,
             'pay_currency' => $payCurrency,
             'pricing_mode' => $pricingMode,

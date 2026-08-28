@@ -46,6 +46,40 @@ final class Json
         return $decoded;
     }
 
+    /**
+     * Encode a payload, emitting the named fields as JSON numbers without ever
+     * turning them into a float.
+     *
+     * The outbound mirror of decodeLossless, and just as necessary. The API
+     * types `price_amount` as a JSON number, so it cannot be sent as a string —
+     * but casting "0.123456789012345678" to float to satisfy that produces
+     * 0.12345678901234568 on the wire. Which is the same silent rounding this
+     * SDK exists to avoid, only on the way out.
+     *
+     * So: encode with the amount as a string, then strip the quotes around
+     * exactly those fields. The value reaches the API as a number with every
+     * digit the caller supplied.
+     *
+     * @param array<string, mixed> $data
+     * @param list<string> $numericFields Keys whose string values must land as numbers.
+     */
+    public static function encodeWithExactNumbers(array $data, array $numericFields): string
+    {
+        $json = json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+
+        foreach ($numericFields as $field) {
+            if (!isset($data[$field]) || !is_string($data[$field])) {
+                continue;
+            }
+            // Anchored on the encoded key so a value elsewhere cannot match.
+            $needle = json_encode($field) . ':"' . $data[$field] . '"';
+            $replacement = json_encode($field) . ':' . $data[$field];
+            $json = str_replace($needle, $replacement, $json);
+        }
+
+        return $json;
+    }
+
     /** Plain decode, for payloads with no monetary fields. */
     public static function decode(string $json): array
     {

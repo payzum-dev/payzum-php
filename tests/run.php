@@ -50,6 +50,20 @@ if (!file_exists($vectorsPath)) {
     exit(2);
 }
 
+// The fixture is a copy of the corpus in payzum-openapi. A copy that nobody
+// checks is a copy that goes stale, which is the exact failure this whole line
+// of work started from — so when the sibling repo is checked out, verify they
+// still match. In CI the corpus arrives as a pinned dependency and this is a
+// no-op.
+$upstream = __DIR__ . '/../../payzum-openapi/vectors/webhook-signatures.json';
+if (file_exists($upstream)) {
+    check(
+        'vector fixture matches payzum-openapi',
+        hash_file('sha256', $upstream) === hash_file('sha256', $vectorsPath),
+        'copy is stale — refresh it from the payzum-openapi repo',
+    );
+}
+
 $corpus = json_decode((string) file_get_contents($vectorsPath), true);
 $verifier = new Verifier($corpus['secret'], $corpus['replay_window_seconds']);
 
@@ -255,6 +269,29 @@ try {
 [$c, $t] = $mkClient([new \Payzum\Http\Response(200, '{"pay_amount":0.123456789012345678}')]);
 $body = $c->request('GET', '/v1/payment/x');
 check('client preserves decimals end to end', $body['pay_amount'] === '0.123456789012345678', var_export($body['pay_amount'], true));
+
+// Outbound amounts must not be rounded either. price_amount has to reach the
+// wire as a JSON number, but casting the string to float to get there is
+// exactly the silent rounding this SDK exists to prevent.
+[$c, $t] = $mkClient([$json(201, ['payment_id' => 'pzi_x'])]);
+$payzumOut = new \Payzum\Payzum($KEY, \Payzum\Payzum::BASE_URL, $t);
+$payzumOut->payments->create('0.123456789012345678', 'usd', 'usdcmatic');
+$sent = $t->calls[0]['body'];
+check(
+    'outbound amount keeps all 18 digits',
+    str_contains($sent, '"price_amount":0.123456789012345678'),
+    $sent,
+);
+check('outbound amount is a JSON number, not a string', !str_contains($sent, '"price_amount":"'));
+
+[$c, $t] = $mkClient([$json(201, [])]);
+$payzumOut = new \Payzum\Payzum($KEY, \Payzum\Payzum::BASE_URL, $t);
+$payzumOut->payments->create('49.99', 'usd', 'usdcmatic', orderId: 'ORDER-49.99');
+check(
+    'only the named field is unquoted, not a lookalike value elsewhere',
+    str_contains($t->calls[0]['body'], '"order_id":"ORDER-49.99"'),
+    $t->calls[0]['body'],
+);
 
 // The api key travels in the right header, and only when authenticated.
 [$c, $t] = $mkClient([$json(200, [])]);
