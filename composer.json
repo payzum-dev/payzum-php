@@ -34,6 +34,20 @@
       "Payzum\\": "src/"
     }
   },
+  "autoload-dev": {
+    "psr-4": {
+      "Payzum\\Tests\\": "tests/"
+    }
+  },
+  "scripts": {
+    "test": [
+      "@composer dump-autoload --dev --quiet",
+      "php tests/run.php"
+    ]
+  },
+  "scripts-descriptions": {
+    "test": "Run the suite. Needs no network and no dev dependencies."
+  },
   "config": {
     "sort-packages": true
   },
