@@ -136,29 +136,9 @@ final class Json
             // A number literal can only start right after : [ , or whitespace,
             // which is exactly where a '-' or digit is legal outside a string.
             if ($c === '-' || ($c >= '0' && $c <= '9')) {
-                $start = $i;
-                if ($c === '-') {
-                    $i++;
-                }
-                while ($i < $len && $json[$i] >= '0' && $json[$i] <= '9') {
-                    $i++;
-                }
-                if ($i < $len && $json[$i] === '.') {
-                    $i++;
-                    while ($i < $len && $json[$i] >= '0' && $json[$i] <= '9') {
-                        $i++;
-                    }
-                }
-                if ($i < $len && ($json[$i] === 'e' || $json[$i] === 'E')) {
-                    $i++;
-                    if ($i < $len && ($json[$i] === '+' || $json[$i] === '-')) {
-                        $i++;
-                    }
-                    while ($i < $len && $json[$i] >= '0' && $json[$i] <= '9') {
-                        $i++;
-                    }
-                }
-                $out .= '"' . substr($json, $start, $i - $start) . '"';
+                $end = self::endOfNumber($json, $i, $len);
+                $out .= '"' . substr($json, $i, $end - $i) . '"';
+                $i = $end;
                 continue;
             }
 
@@ -167,5 +147,45 @@ final class Json
         }
 
         return $out;
+    }
+
+    /**
+     * Index just past the JSON number literal starting at $start.
+     *
+     * Grammar per RFC 8259: an optional minus, an integer part, an optional
+     * fraction, an optional exponent.
+     */
+    private static function endOfNumber(string $json, int $start, int $len): int
+    {
+        $i = $start;
+
+        if ($i < $len && $json[$i] === '-') {
+            $i++;
+        }
+
+        $i = self::skipDigits($json, $i, $len);
+
+        if ($i < $len && $json[$i] === '.') {
+            $i = self::skipDigits($json, $i + 1, $len);
+        }
+
+        if ($i < $len && ($json[$i] === 'e' || $json[$i] === 'E')) {
+            $i++;
+            if ($i < $len && ($json[$i] === '+' || $json[$i] === '-')) {
+                $i++;
+            }
+            $i = self::skipDigits($json, $i, $len);
+        }
+
+        return $i;
+    }
+
+    private static function skipDigits(string $json, int $i, int $len): int
+    {
+        while ($i < $len && $json[$i] >= '0' && $json[$i] <= '9') {
+            $i++;
+        }
+
+        return $i;
     }
 }

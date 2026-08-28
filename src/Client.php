@@ -64,21 +64,13 @@ final class Client
         /** Keys whose string values must go out as exact JSON numbers. */
         array $exactNumericFields = [],
     ): array {
-        $headers = $extraHeaders + [
-            'Accept' => 'application/json',
-            'User-Agent' => 'payzum-php/' . Payzum::VERSION,
-        ];
-
-        if ($authenticated) {
-            $headers['x-api-key'] = $this->config->apiKey;
-        }
+        $headers = $this->buildHeaders($extraHeaders, $authenticated, $json !== null);
 
         $body = null;
         if ($json !== null) {
             // Amounts stay strings all the way here and become numbers only in
             // the encoded text, so no float ever touches them (see Json).
             $body = Json::encodeWithExactNumbers($json, $exactNumericFields);
-            $headers['Content-Type'] = 'application/json';
         }
 
         $url = rtrim($this->config->baseUrl, '/') . $path;
@@ -145,6 +137,28 @@ final class Client
             retryable: $idempotencyKey !== null,
             exactNumericFields: ['price_amount'],
         );
+    }
+
+    /**
+     * @param array<string, string> $extra
+     * @return array<string, string>
+     */
+    private function buildHeaders(array $extra, bool $authenticated, bool $hasBody): array
+    {
+        $headers = $extra + [
+            'Accept' => 'application/json',
+            'User-Agent' => 'payzum-php/' . Payzum::VERSION,
+        ];
+
+        if ($authenticated) {
+            $headers['x-api-key'] = $this->config->apiKey;
+        }
+
+        if ($hasBody) {
+            $headers['Content-Type'] = 'application/json';
+        }
+
+        return $headers;
     }
 
     private function toApiException(Response $response): ApiException
