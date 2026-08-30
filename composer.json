@@ -27,7 +27,8 @@
     "source": "https://github.com/payzum-dev/payzum-php"
   },
   "require": {
-    "php": ">=8.1"
+    "php": ">=8.1",
+    "ext-curl": "*"
   },
   "autoload": {
     "psr-4": {
