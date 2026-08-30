@@ -26,6 +26,22 @@ use Payzum\Json;
  */
 final class Verifier
 {
+    /**
+     * The five event types the payment IPN emits — five, not two. An
+     * integration that handles only paid/expired silently discards the three
+     * others, including the two that matter for security.
+     *
+     * There is deliberately no `invoice.partial` and no cancellation event:
+     * the gateway sends no IPN for those — they are only observable by polling.
+     */
+    public const IPN_EVENT_TYPES = [
+        'invoice.paid',
+        'invoice.expired',
+        'late_deposit_received',
+        'wrong_token_received',
+        'suspicious_token_received',
+    ];
+
     /** Payment IPN. Fixed — see the class docblock. */
     private const HEADER_PAYMENT_IPN = 'x-nowpayments-sig';
 

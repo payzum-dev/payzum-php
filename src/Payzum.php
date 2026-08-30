@@ -79,4 +79,16 @@ final class Payzum
     {
         return new Verifier($webhookSecret);
     }
+
+    /**
+     * API diagnostics (GET /v1/status). Public — useful as a connectivity
+     * probe before blaming your own network. (`/health` exists separately for
+     * the platform's own probes and is deliberately not exposed here.)
+     *
+     * @return array<string, mixed>
+     */
+    public function health(): array
+    {
+        return $this->client->request('GET', '/v1/status', authenticated: false);
+    }
 }

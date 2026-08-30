@@ -149,6 +149,14 @@ check(
     $verifier->eventId(['X-Payzum-Event-Id' => 'pzie_abc']) === 'pzie_abc',
 );
 
+check(
+    'all five IPN event types are typed, including the two security ones',
+    count(Verifier::IPN_EVENT_TYPES) === 5
+        && in_array('wrong_token_received', Verifier::IPN_EVENT_TYPES, true)
+        && in_array('suspicious_token_received', Verifier::IPN_EVENT_TYPES, true)
+        && !in_array('invoice.partial', Verifier::IPN_EVENT_TYPES, true),
+);
+
 // ---------------------------------------------- decimals
 
 section('Money keeps its digits');
@@ -241,11 +249,19 @@ try {
     check('create without key is not retried', $t->callCount() === 1, "calls={$t->callCount()}");
 }
 
-// With a key it may retry, and the key is actually sent.
+// With a key it may retry, and the key is actually sent. The retry must also
+// wait out the idempotency consistency window (~60s): inside it the API's
+// dedup may not have converged, and a retry can create a second real invoice.
+$slept = [];
 [$c, $t] = $mkClient([$err(500, 'INTERNAL_ERROR'), $json(201, ['payment_id' => 'pzi_x'])]);
 $c->createPayment(['price_amount' => 1], 'order-12345');
 check('create with key retries', $t->callCount() === 2, "calls={$t->callCount()}");
 check('Idempotency-Key header sent', ($t->calls[0]['headers']['Idempotency-Key'] ?? null) === 'order-12345');
+check(
+    'create retry waits out the consistency window',
+    $slept !== [] && $slept[0] >= \Payzum\Client::consistencyWindowSeconds(),
+    'slept=' . json_encode($slept),
+);
 
 // A transport failure on create is not retried either — the invoice may exist.
 [$c, $t] = $mkClient([new \Payzum\Http\TransportException('timeout')]);
@@ -344,6 +360,16 @@ try {
 } catch (\Payzum\Errors\PayzumException) {
     check('malformed invoice id rejected locally', true);
 }
+
+$t = new \Payzum\Tests\FakeTransport([$json(200, ['status' => 'ok'])]);
+$payzum = new \Payzum\Payzum($KEY, \Payzum\Payzum::BASE_URL, $t);
+$body = $payzum->health();
+check(
+    'health hits /v1/status unauthenticated',
+    ($body['status'] ?? null) === 'ok'
+        && str_ends_with($t->calls[0]['url'], '/v1/status')
+        && !isset($t->calls[0]['headers']['x-api-key']),
+);
 
 // ---------------------------------------------- result
 

@@ -63,6 +63,11 @@ final class Client
         bool $retryable = true,
         /** Keys whose string values must go out as exact JSON numbers. */
         array $exactNumericFields = [],
+        /**
+         * Floor for every backoff of this request. Used by invoice creation to
+         * wait out the idempotency consistency window before the first retry.
+         */
+        int $minRetryDelaySeconds = 0,
     ): array {
         $headers = $this->buildHeaders($extraHeaders, $authenticated, $json !== null);
 
@@ -91,7 +96,7 @@ final class Client
                 if (!$retryable || $attempt >= $this->config->maxRetries) {
                     throw $e;
                 }
-                $this->backoff(++$attempt, null);
+                $this->backoff(++$attempt, null, $minRetryDelaySeconds);
                 continue;
             }
 
@@ -105,7 +110,7 @@ final class Client
                 throw $error;
             }
 
-            $this->backoff(++$attempt, $error->retryAfterSeconds);
+            $this->backoff(++$attempt, $error->retryAfterSeconds, $minRetryDelaySeconds);
         }
     }
 
@@ -136,6 +141,7 @@ final class Client
             extraHeaders: $headers,
             retryable: $idempotencyKey !== null,
             exactNumericFields: ['price_amount'],
+            minRetryDelaySeconds: self::CONSISTENCY_WINDOW_SECONDS,
         );
     }
 
@@ -175,11 +181,12 @@ final class Client
     /**
      * Honour Retry-After when the server sends it; otherwise exponential
      * backoff with jitter, so a fleet of workers does not resynchronise into a
-     * thundering herd after a shared outage.
+     * thundering herd after a shared outage. Either way the delay never dips
+     * below the per-request floor (the consistency window, for creates).
      */
-    private function backoff(int $attempt, ?int $retryAfter): void
+    private function backoff(int $attempt, ?int $retryAfter, int $floorSeconds = 0): void
     {
-        $base = $retryAfter ?? (2 ** $attempt);
+        $base = max($retryAfter ?? (2 ** $attempt), $floorSeconds);
         $jitter = random_int(0, 1000) / 1000;
         ($this->sleeper)((int) ceil($base + $jitter));
     }
