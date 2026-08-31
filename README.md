@@ -1,147 +1,98 @@
-# payzum-php
+# payzum/payzum-php — official PHP SDK
 
-Official PHP SDK for [Payzum](https://payzum.com) — accept stablecoin and crypto
-payments, and verify IPN webhooks.
+Accept crypto and stablecoin payments (USDC/USDT, multi-chain) with
+[Payzum](https://merchant.payzum.com). Non-custodial — funds settle to your own
+wallet. Zero runtime dependencies (PHP ≥ 8.1 with curl).
 
-```bash
+```
 composer require payzum/payzum-php
 ```
 
-Zero runtime dependencies. PHP 8.1+.
+You need two values from your [Payzum dashboard](https://merchant.payzum.com):
+an **API key** and a **webhook secret**.
 
-## Quick start
+## Charge a customer
 
 ```php
 use Payzum\Payzum;
 
-$payzum = new Payzum($_ENV['PAYZUM_API_KEY']);
+$payzum = new Payzum('your-api-key');       // Payzum::sandbox(...) for staging
 
 $invoice = $payzum->payments->create(
-    priceAmount: '49.99',
+    priceAmount: '49.99',                   // a string — never a float
     priceCurrency: 'usd',
-    payCurrency: 'all',          // let the buyer pick the asset
+    payCurrency: 'all',                     // the buyer picks the coin on the checkout page
     orderId: 'ORDER-12345',
+    ipnCallbackUrl: 'https://your-shop.example/payzum/ipn',
+    idempotencyKey: 'ORDER-12345',          // lets the SDK retry safely on network hiccups
 );
-
 header('Location: ' . $invoice['invoice_url']);
 ```
 
-Then, in your webhook endpoint — against the **raw** body, before any parsing:
+That's the whole flow: create, redirect, and wait for the webhook. Which coins
+the buyer can pick is configured in your dashboard, not in code.
+
+## Get notified when it's paid
+
+Payzum POSTs a signed webhook (IPN) to your `ipnCallbackUrl`. Hand the SDK the
+**raw request body** and the headers — it finds the right header, checks the
+signature and rejects replays, all by itself:
 
 ```php
-$payload = $payzum->webhooks($_ENV['PAYZUM_WEBHOOK_SECRET'])
-    ->verifyPaymentIpn(file_get_contents('php://input'), getallheaders());
+use Payzum\Errors\SignatureException;
+use Payzum\PaymentStatus;
+use Payzum\Webhooks\Verifier;
 
-if (Payzum\PaymentStatus::fromMerchant($payload['payment_status'])->isPaid()) {
-    fulfil($payload['order_id']);
+try {
+    $verifier = new Verifier($webhookSecret);
+    $data = $verifier->verifyPaymentIpn(
+        file_get_contents('php://input'),   // RAW bytes, before any parsing
+        getallheaders(),
+    );
+} catch (SignatureException $e) {
+    http_response_code(401);
+    exit('bad signature');
+}
+
+$status = PaymentStatus::fromMerchant($data['payment_status']);
+if ($status->isPaid()) {
+    fulfilOrder($data['order_id']);         // only fulfil on isPaid()
 }
 ```
 
-Verification throws on failure rather than returning a boolean, so it cannot be
-ignored by accident.
+Deliveries can arrive more than once — deduplicate on
+`$verifier->eventId($headers)` if a repeat must be a no-op on your side.
 
-## What it handles for you
+## Statuses
 
-**The three webhook signature schemes.** They are not interchangeable, and
-mixing them is the most expensive mistake available with this API:
+A payment is always in one of five states: `waiting`, `partially_paid`,
+`finished`, `expired`, `failed`. Everything you need is on the enum:
 
-| Webhook | Algorithm | Header |
-|---|---|---|
-| Payment IPN | HMAC-SHA-512 | `x-nowpayments-sig` |
-| Payment IPN, CoinPayments-mode merchants | HMAC-SHA-512, form-encoded body | `HMAC` |
-| Mass payout | HMAC-SHA-256 | `X-Payzum-Signature` |
+- `$status->isPaid()` — safe to fulfil (covers overpayment too).
+- `$status->isTerminal()` — nothing further will happen.
+- `PaymentStatus::fromMerchant(...)` throws on anything unexpected, so a
+  surprise value can never be mistaken for "paid".
 
-Payzum ships 21 cart plugins; **20 of them read the mass-payout header for a
-payment IPN**. The signature never verifies, deliveries 401, the gateway retries
-five times and dead-letters, and the order is silently never fulfilled. The SDK
-owns the header names so that class of bug cannot recur — they are not
-configurable, and lookup is case-insensitive.
+## Errors
 
-Verification also covers the replay window (10 minutes against the signed
-`event_at`) and exposes the event id to deduplicate on. For CoinPayments-mode
-deliveries there is no window, because that payload carries no timestamp at all
-— deduplicate on `ipn_id`.
+Everything throws a typed exception: `ApiException` (with `->errorCode`, e.g.
+`AmountBelowMinimum`, to branch on — never branch on messages),
+`SignatureException` for webhooks, `TransportException` for network failures,
+`PayzumException` for local validation.
 
-**Money that keeps its digits.** The payments surface returns amounts as JSON
-numbers, and `json_decode` turns `0.123456789012345678` into
-`0.12345678901234568` with no error. The SDK decodes losslessly and hands back
-exact decimal strings. Worth knowing the ceiling, though: the gateway itself
-casts to double before serialising, so those digits are already gone upstream.
-What this buys is that the SDK adds no *further* loss. When you need genuinely
-exact amounts, read `$payzum->invoices->status()` — the buyer surface uses
-decimal strings end to end.
+Transient failures are retried for you, honouring the server's back-off hints.
+A create is **only** retried when you pass an `idempotencyKey`, and then in a
+way that cannot double-charge.
 
-**One status vocabulary.** The merchant surface emits five values and the buyer
-surface six, with no name in common. `PaymentStatus` maps both.
+## Amounts are exact
 
-There is no `overpaid` on the merchant surface: overpayment is handled
-internally and resolved case by case by support, so the merchant is simply told
-"paid". `unconfirmed` does not exist either, despite older documentation.
+Amounts go in as strings and come back as exact decimal strings — the SDK
+never converts money through a float in either direction.
 
-**Retries that will not double-charge.** Three of the sixteen error codes are
-retryable. `QUOTA_EXCEEDED` is not, despite arriving as a 429 — it means too
-many invoices are open, so retrying makes it worse.
+## Testing your integration
 
-Invoice creation is **never** retried automatically without an
-`Idempotency-Key`, because the API does not enforce `order_id` uniqueness and a
-blind retry creates a second real invoice. Pass a key to opt in:
+`new Payzum($apiKey, Payzum::BASE_URL, $transport)` accepts any
+`Payzum\Http\Transport` implementation, so you can test without touching the
+network. The SDK's own suite runs with `composer test`.
 
-```php
-$payzum->payments->create(
-    priceAmount: '49.99',
-    priceCurrency: 'usd',
-    payCurrency: 'usdcmatic',
-    orderId: 'ORDER-12345',
-    idempotencyKey: 'ORDER-12345',
-);
-```
-
-**Local validation** that saves a round trip: API key length, invoice id shape,
-`pricing_mode: "direct"` against `pay_currency: "all"`, and `sortBy` values the
-server would otherwise ignore in silence.
-
-## Other things you can do
-
-```php
-// Check the minimum before you commit the buyer to an amount.
-$min = $payzum->rates->minAmount('usd', 'usdcmatic');
-
-// Read an invoice by Payzum id or by your own order id.
-$invoice = $payzum->payments->get('ORDER-12345');
-
-// Buyer-facing status: no API key, exact decimal amounts.
-$status = $payzum->invoices->status('pzi_c8k2m4p6r8t0v2x4z6b8d0f2');
-
-// Supported assets, with the chain of each — the flat list cannot tell you
-// which of the four `eth` entries is Arbitrum, Base, Ethereum or Optimism.
-$polygon = $payzum->currencies->onChain('polygon');
-```
-
-## Sandbox
-
-```php
-$payzum = Payzum::sandbox($_ENV['PAYZUM_STAGING_KEY']);
-```
-
-Staging has isolated data and its own API keys. Note that `api.payzum.com` does
-**not** serve the API — use `merchant.payzum.com`.
-
-## Tests
-
-```bash
-composer test
-```
-
-No network and no dev dependencies. Webhook verification is checked against the
-shared corpus in [`payzum-openapi`](https://github.com/payzum-dev/payzum-openapi),
-the same vectors the TypeScript and Python SDKs verify against — including cases
-that reproduce the cross-scheme confusion above, so no SDK can ship it.
-
-## Links
-
-- Documentation: <https://merchant.payzum.com/docs>
-- Machine-readable reference for AI agents: <https://merchant.payzum.com/llms.txt>
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+Docs: <https://merchant.payzum.com/docs> · llms: <https://merchant.payzum.com/llms.txt>
