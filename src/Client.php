@@ -51,6 +51,7 @@ final class Client
      * @param array<string, string|int> $query
      * @param array<string, mixed>|null $json
      * @param array<string, string> $extraHeaders
+     * @param list<string> $exactNumericFields
      * @return array<string, mixed>
      */
     public function request(

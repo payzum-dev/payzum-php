@@ -21,6 +21,10 @@ final class CurlTransport implements Transport
             $url .= '?' . http_build_query($query);
         }
 
+        if ($method === '') {
+            throw new PayzumException('HTTP method must not be empty.');
+        }
+
         $ch = curl_init($url);
         if ($ch === false) {
             throw new PayzumException('Could not initialise curl.');

@@ -80,7 +80,11 @@ final class Json
         return $json;
     }
 
-    /** Plain decode, for payloads with no monetary fields. */
+    /**
+     * Plain decode, for payloads with no monetary fields.
+     *
+     * @return array<mixed>
+     */
     public static function decode(string $json): array
     {
         $decoded = json_decode($json, true);
