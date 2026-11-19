@@ -30,6 +30,9 @@
     "php": ">=8.1",
     "ext-curl": "*"
   },
+  "require-dev": {
+    "phpstan/phpstan": "^2.3"
+  },
   "autoload": {
     "psr-4": {
       "Payzum\\": "src/"
@@ -44,10 +47,12 @@
     "test": [
       "@composer dump-autoload --dev --quiet",
       "php tests/run.php"
-    ]
+    ],
+    "analyse": "vendor/bin/phpstan analyse --no-progress"
   },
   "scripts-descriptions": {
-    "test": "Run the suite. Needs no network and no dev dependencies."
+    "test": "Run the suite. Needs no network and no dev dependencies.",
+    "analyse": "Static analysis: PHPStan level 8 over src/."
   },
   "config": {
     "sort-packages": true
